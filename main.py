@@ -1,35 +1,41 @@
 import logging
-from fastapi import FastAPI,Request
-from fastapi.responses import JSONResponse
 
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base
 from models.task import Task
 from models.user import User
 from router import task
 from router import user
-from fastapi.middleware.cors import CORSMiddleware
 
 from exceptions import (
     TaskNotFoundException,
     task_not_found_handler
 )
 
+
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
 
-
 app = FastAPI()
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://task-management-frontend-delta-peach.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 Base.metadata.create_all(bind=engine)
@@ -59,6 +65,7 @@ async def global_exception_handler(
         }
     )
 
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
 
@@ -73,8 +80,6 @@ async def log_requests(request: Request, call_next):
     )
 
     return response
-
-
 
 
 @app.get("/")
