@@ -13,6 +13,6 @@ class Task(Base):
     completed = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
 
-    user_id = Column(Integer, ForeignKey("users.id"),
+    user_id = Column(Integer, ForeignKey("users.id"))
 
-    index =True)
+    index =True
