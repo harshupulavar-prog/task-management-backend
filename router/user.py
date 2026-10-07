@@ -1,15 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordRequestForm
 
 from database import get_db
 from models.user import User
 from schemas.user import UserCreate, UserResponse
-
-from fastapi.security import OAuth2PasswordRequestForm
-from fastapi import Depends
 from auth import create_access_token
-
 
 
 router = APIRouter()
@@ -25,13 +22,21 @@ def create_user(
     user: UserCreate,
     db: Session = Depends(get_db)
 ):
-
-
     if len(user.password.encode("utf-8")) > 72:
-       raise HTTPException(
-        status_code=400,
-        detail="Password must be 72 bytes or less"
-    )
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be 72 bytes or less"
+        )
+
+    existing_user = db.query(User).filter(
+        User.email == user.email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
 
     hashed_password = pwd_context.hash(user.password)
 
@@ -52,6 +57,22 @@ def signup(
     user: UserCreate,
     db: Session = Depends(get_db)
 ):
+    if len(user.password.encode("utf-8")) > 72:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be 72 bytes or less"
+        )
+
+    existing_user = db.query(User).filter(
+        User.email == user.email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+
     hashed_password = pwd_context.hash(user.password)
 
     new_user = User(
@@ -71,31 +92,31 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    # Find user by email
     user = db.query(User).filter(
         User.email == form_data.username
     ).first()
 
-    # User doesn't exist
     if user is None:
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
-    # Check password
-    if not pwd_context.verify(
-        form_data.password,
-        user.hashed_password
-    ):
-
-      if len(form_data.password.encode("utf-8")) > 72:
-         raise HTTPException(
+    if len(form_data.password.encode("utf-8")) > 72:
+        raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
-    # Create JWT
+    if not pwd_context.verify(
+        form_data.password,
+        user.hashed_password
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
     token = create_access_token(user.email)
 
     return {

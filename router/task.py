@@ -15,25 +15,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/tasks", response_model=list[TaskResponse])
-def get_tasks(
-    db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user)
-):
-    user = db.query(User).filter(
-        User.email == current_user
-    ).first()
-
-    if user is None:
-        raise HTTPException(
-            status_code=401,
-            detail="User not found"
-        )
-
-    return db.query(Task).filter(
-        Task.user_id == user.id
-    ).all()
-
 
 @router.get("/tasks", response_model=list[TaskResponse])
 def get_tasks(
