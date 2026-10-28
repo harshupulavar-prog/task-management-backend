@@ -3,10 +3,9 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from database import engine, Base
-from models.task import Task
-from models.user import User
 from router import task
 from router import user
 
@@ -16,7 +15,10 @@ from exceptions import (
 )
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,28 @@ app.add_middleware(
 
 
 Base.metadata.create_all(bind=engine)
+
+with engine.begin() as connection:
+    user_columns = {
+        column["name"] for column in inspect(connection).get_columns("users")
+    }
+    if "phone" not in user_columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
+    if "role" not in user_columns:
+        connection.execute(
+            text("ALTER TABLE users ADD COLUMN role VARCHAR NOT NULL DEFAULT 'user'")
+        )
+    pending_signup_columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("pending_signups")
+    }
+    if "role" not in pending_signup_columns:
+        connection.execute(
+            text(
+                "ALTER TABLE pending_signups "
+                "ADD COLUMN role VARCHAR NOT NULL DEFAULT 'user'"
+            )
+        )
 
 
 app.include_router(task.router)
