@@ -25,11 +25,18 @@ def get_tasks(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
+    logger.info(
+        "Task list requested (completed=%s, skip=%s, limit=%s)",
+        completed,
+        skip,
+        limit,
+    )
     user = db.query(User).filter(
         User.email == current_user
     ).first()
 
     if user is None:
+        logger.warning("Task list rejected: authenticated user record not found")
         raise HTTPException(
             status_code=401,
             detail="User not found"
@@ -44,7 +51,9 @@ def get_tasks(
             Task.completed == completed
         )
 
-    return query.offset(skip).limit(limit).all()
+    tasks = query.offset(skip).limit(limit).all()
+    logger.info("Task list returned %s task(s) (user_id=%s)", len(tasks), user.id)
+    return tasks
 
 @router.post(
     "/tasks",
@@ -56,11 +65,13 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
+    logger.info("Task creation requested")
     user = db.query(User).filter(
         User.email == current_user
     ).first()
 
     if user is None:
+        logger.warning("Task creation rejected: authenticated user record not found")
         raise HTTPException(
             status_code=401,
             detail="User not found"
@@ -77,6 +88,7 @@ def create_task(
     db.commit()
     db.refresh(new_task)
 
+    logger.info("Task created (task_id=%s, user_id=%s)", new_task.id, user.id)
     return new_task
 
 
@@ -87,11 +99,16 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
+    logger.info(
+        "Task update requested (task_id=%s)",
+        task_id,
+    )
     user = db.query(User).filter(
         User.email == current_user
     ).first()
 
     if user is None:
+        logger.warning("Task update rejected: authenticated user record not found")
         raise HTTPException(
             status_code=401,
             detail="User not found"
@@ -103,6 +120,11 @@ def update_task(
     ).first()
 
     if existing_task is None:
+        logger.warning(
+            "Task update rejected: task not found for owner (task_id=%s, user_id=%s)",
+            task_id,
+            user.id,
+        )
         raise HTTPException(
             status_code=404,
             detail="Task not found"
@@ -115,6 +137,7 @@ def update_task(
     db.commit()
     db.refresh(existing_task)
 
+    logger.info("Task updated (task_id=%s, user_id=%s)", task_id, user.id)
     return existing_task
 
 
@@ -125,11 +148,16 @@ def patch_task(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
+    logger.info(
+        "Task patch requested (task_id=%s)",
+        task_id,
+    )
     user = db.query(User).filter(
         User.email == current_user
     ).first()
 
     if user is None:
+        logger.warning("Task patch rejected: authenticated user record not found")
         raise HTTPException(
             status_code=401,
             detail="User not found"
@@ -141,6 +169,11 @@ def patch_task(
     ).first()
 
     if existing_task is None:
+        logger.warning(
+            "Task patch rejected: task not found for owner (task_id=%s, user_id=%s)",
+            task_id,
+            user.id,
+        )
         raise HTTPException(
             status_code=404,
             detail="Task not found"
@@ -158,6 +191,7 @@ def patch_task(
     db.commit()
     db.refresh(existing_task)
 
+    logger.info("Task patched (task_id=%s, user_id=%s)", task_id, user.id)
     return existing_task
 
 
@@ -167,11 +201,16 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
+    logger.info(
+        "Task deletion requested (task_id=%s)",
+        task_id,
+    )
     user = db.query(User).filter(
         User.email == current_user
     ).first()
 
     if user is None:
+        logger.warning("Task deletion rejected: authenticated user record not found")
         raise HTTPException(
             status_code=401,
             detail="User not found"
@@ -183,6 +222,11 @@ def delete_task(
     ).first()
 
     if existing_task is None:
+        logger.warning(
+            "Task deletion rejected: task not found for owner (task_id=%s, user_id=%s)",
+            task_id,
+            user.id,
+        )
         raise HTTPException(
             status_code=404,
             detail="Task not found"
@@ -191,6 +235,7 @@ def delete_task(
     db.delete(existing_task)
     db.commit()
 
+    logger.info("Task deleted (task_id=%s, user_id=%s)", task_id, user.id)
     return {
         "message": "Task deleted successfully"
     }

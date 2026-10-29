@@ -180,9 +180,16 @@ def _require_admin(
 ) -> User:
     user = db.query(User).filter(User.email == email).first()
     if user is None:
+        logger.warning("[AUTHZ] Admin access denied: authenticated account not found")
         raise HTTPException(status_code=401, detail="User not found")
     if user.role != "admin":
+        logger.warning(
+            "[AUTHZ] Admin access denied (user_id=%s, role=%s)",
+            user.id,
+            user.role,
+        )
         raise HTTPException(status_code=403, detail="Admin access required")
+    logger.info("[AUTHZ] Admin access granted (user_id=%s)", user.id)
     return user
 
 
@@ -249,14 +256,18 @@ def request_signup_otp(
 @router.post(
     "/admin/signup",
     status_code=202,
-    dependencies=[Depends(_require_admin)],
 )
 def request_admin_signup_otp(
     signup: AdminSignupRequest,
     db: Session = Depends(get_db),
+    admin: User = Depends(_require_admin),
 ):
     masked_email = _mask_email(signup.email)
-    logger.info("[OTP] Admin signup invitation requested (email=%s)", masked_email)
+    logger.info(
+        "[OTP] Admin signup invitation requested (admin_id=%s, invited_email=%s)",
+        admin.id,
+        masked_email,
+    )
     if db.query(User).filter(func.lower(User.email) == signup.email).first():
         logger.warning(
             "[OTP] Admin invitation rejected: account already exists (email=%s)",
@@ -271,6 +282,10 @@ def request_admin_signup_otp(
         .first()
     )
     if pending and pending.role != "admin":
+        logger.warning(
+            "[OTP] Admin invitation rejected: regular signup pending (email=%s)",
+            masked_email,
+        )
         raise HTTPException(
             status_code=409,
             detail="A regular signup is already pending for this email. Complete it before inviting as admin.",
@@ -336,6 +351,10 @@ def verify_admin_signup_otp(
     if db.query(User).filter(func.lower(User.email) == verification.email).first():
         db.delete(pending)
         db.commit()
+        logger.warning(
+            "[OTP] Admin invitation rejected: account already exists (email=%s)",
+            masked_email,
+        )
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
@@ -408,6 +427,10 @@ def verify_signup_otp(
         )
 
     if pending.role != "user":
+        logger.warning(
+            "[OTP] Public verification rejected: admin invitation pending (email=%s)",
+            masked_email,
+        )
         raise HTTPException(
             status_code=409,
             detail="This email has an admin invitation. Complete setup using the invitation link.",
@@ -438,18 +461,29 @@ def verify_signup_otp(
     "/users",
     response_model=UserResponse,
     status_code=201,
-    dependencies=[Depends(_require_admin)],
 )
 def create_user(
     user: UserCreate,
     db: Session = Depends(get_db),
+    admin: User = Depends(_require_admin),
 ):
+    masked_email = _mask_email(user.email)
+    logger.info(
+        "[AUTH] Admin user creation requested (admin_id=%s, email=%s)",
+        admin.id,
+        masked_email,
+    )
     if len(user.password.encode("utf-8")) > 72:
+        logger.warning("[AUTH] Admin user creation rejected: password exceeds allowed length")
         raise HTTPException(
             status_code=400,
             detail="Password must be 72 bytes or less",
         )
     if db.query(User).filter(func.lower(User.email) == user.email).first():
+        logger.warning(
+            "[AUTH] Admin user creation rejected: account already exists (email=%s)",
+            masked_email,
+        )
         raise HTTPException(status_code=400, detail="Email already registered")
 
     new_user = User(
@@ -460,6 +494,12 @@ def create_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    logger.info(
+        "[AUTH] User account created by admin (user_id=%s, admin_id=%s, email=%s)",
+        new_user.id,
+        admin.id,
+        masked_email,
+    )
     return new_user
 
 
@@ -517,31 +557,49 @@ def login(
 @router.get(
     "/admin/users",
     response_model=list[UserResponse],
-    dependencies=[Depends(_require_admin)],
 )
 def list_users(
     db: Session = Depends(get_db),
+    admin: User = Depends(_require_admin),
 ):
-    return db.query(User).order_by(User.id).all()
+    users = db.query(User).order_by(User.id).all()
+    logger.info("[AUTHZ] User list returned (admin_id=%s, count=%s)", admin.id, len(users))
+    return users
 
 
 @router.patch(
     "/admin/users/{user_id}/role",
     response_model=UserResponse,
-    dependencies=[Depends(_require_admin)],
 )
 def update_user_role(
     user_id: int,
     update: UserRoleUpdate,
     db: Session = Depends(get_db),
+    admin: User = Depends(_require_admin),
 ):
+    logger.info(
+        "[AUTHZ] Role change requested (admin_id=%s, target_user_id=%s, role=%s)",
+        admin.id,
+        user_id,
+        update.role,
+    )
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
+        logger.warning(
+            "[AUTHZ] Role change rejected: target user not found (admin_id=%s, target_user_id=%s)",
+            admin.id,
+            user_id,
+        )
         raise HTTPException(status_code=404, detail="User not found")
 
     if user.role == "admin" and update.role != "admin":
         admin_count = db.query(User).filter(User.role == "admin").count()
         if admin_count <= 1:
+            logger.warning(
+                "[AUTHZ] Role change rejected: cannot demote last admin (admin_id=%s, target_user_id=%s)",
+                admin.id,
+                user_id,
+            )
             raise HTTPException(
                 status_code=400,
                 detail="At least one admin account must remain",
@@ -550,4 +608,10 @@ def update_user_role(
     user.role = update.role
     db.commit()
     db.refresh(user)
+    logger.info(
+        "[AUTHZ] Role changed (admin_id=%s, target_user_id=%s, role=%s)",
+        admin.id,
+        user.id,
+        user.role,
+    )
     return user

@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -62,6 +63,7 @@ with engine.begin() as connection:
                 "ADD COLUMN role VARCHAR NOT NULL DEFAULT 'user'"
             )
         )
+logger.info("Database schema initialization complete")
 
 
 app.include_router(task.router)
@@ -79,7 +81,12 @@ async def global_exception_handler(
     request: Request,
     exc: Exception
 ):
-    logger.error(f"Unexpected error: {exc}")
+    logger.error(
+        "Unhandled request error (method=%s, path=%s, error_type=%s)",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
 
     return JSONResponse(
         status_code=500,
@@ -91,17 +98,20 @@ async def global_exception_handler(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-
-    logger.info(
-        f"Incoming request: {request.method} {request.url.path}"
-    )
-
+    started_at = perf_counter()
+    logger.info("Request started (method=%s, path=%s)", request.method, request.url.path)
     response = await call_next(request)
-
-    logger.info(
-        f"Response status: {response.status_code}"
+    elapsed_ms = (perf_counter() - started_at) * 1000
+    log_method = logger.info if response.status_code < 400 else logger.warning
+    if response.status_code >= 500:
+        log_method = logger.error
+    log_method(
+        "Request completed (method=%s, path=%s, status=%s, duration_ms=%.1f)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
     )
-
     return response
 
 
