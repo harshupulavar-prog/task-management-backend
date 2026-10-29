@@ -99,7 +99,13 @@ def _send_signup_otp(email: str, code: str, *, admin_invite: bool = False) -> No
 
     resend.api_key = api_key
     try:
-        resend.Emails.send(
+        logger.info(
+            "[OTP] Sending %s email through Resend (sender=%s, recipient=%s)",
+            "admin invitation" if admin_invite else "signup verification",
+            sender,
+            _mask_email(email),
+        )
+        result = resend.Emails.send(
             {
                 "from": sender,
                 "to": [email],
@@ -108,14 +114,39 @@ def _send_signup_otp(email: str, code: str, *, admin_invite: bool = False) -> No
             }
         )
         logger.info(
-            "[OTP] Email provider accepted verification message (email=%s)",
+            "[OTP] Resend accepted %s email (email=%s, email_id=%s)",
+            "admin invitation" if admin_invite else "signup verification",
             _mask_email(email),
+            result.get("id", "unknown") if isinstance(result, dict) else "unknown",
         )
     except ResendError as error:
+        diagnostic = str(error.message)
+        for sensitive_value in (api_key, email, code):
+            if sensitive_value:
+                diagnostic = diagnostic.replace(sensitive_value, "[redacted]")
         logger.warning(
-            "[OTP] Email provider rejected verification message (status=%s, type=%s, email=%s)",
+            "[OTP] Resend rejected %s email (status=%s, type=%s, sender=%s, recipient=%s, detail=%s)",
+            "admin invitation" if admin_invite else "signup verification",
             error.code,
             error.error_type,
+            sender,
+            _mask_email(email),
+            diagnostic,
+        )
+        if str(error.code) == "403":
+            logger.warning(
+                "[OTP] Resend returned 403; check that EMAIL_FROM uses a verified domain "
+                "and that the recipient is allowed for the current Resend account"
+            )
+        raise HTTPException(
+            status_code=502,
+            detail="Email delivery failed",
+        ) from error
+    except Exception as error:
+        logger.error(
+            "[OTP] Resend request failed unexpectedly (error_type=%s, sender=%s, recipient=%s)",
+            type(error).__name__,
+            sender,
             _mask_email(email),
         )
         raise HTTPException(
