@@ -6,11 +6,13 @@ New accounts are created only after the user verifies a six-digit OTP sent to th
 
 - `SECRET_KEY`: secret used to sign access tokens.
 - `OTP_SECRET_KEY`: optional separate secret used to hash signup OTPs. If omitted, `SECRET_KEY` is used.
-- `RESEND_API_KEY`: secret API key created in the Resend dashboard. Keep it in the backend environment, never in the frontend or source control.
-- `EMAIL_FROM`: sender address configured in Resend. It defaults to `onboarding@resend.dev` for testing.
+- `SMTP_HOST`, `SMTP_PORT`: outgoing mail server and port.
+- `SMTP_USERNAME`, `SMTP_PASSWORD`: SMTP login credentials (for Gmail, use an App Password, not your normal account password).
+- `SMTP_FROM_EMAIL`: sender address accepted by your mail provider.
+- `SMTP_USE_TLS`, `SMTP_USE_SSL`: select STARTTLS (587) or implicit SSL (465); do not enable both.
 - `FRONTEND_BASE_URL`: frontend origin used in admin invitation links (defaults to `http://localhost:5173`).
 
-In Render, add `RESEND_API_KEY` and `EMAIL_FROM` to the backend service's environment variables, then redeploy. For initial testing, Resend's `onboarding@resend.dev` sender can only deliver to the permitted test recipient(s) for your Resend account. To send OTPs to other users, verify a domain in Resend and set `EMAIL_FROM` to an address on that domain. For local development, set these values in the ignored `.env` file. Copy `.env.example` as a reference and keep `.env` private.
+For Gmail, use `smtp.gmail.com`, port `587`, and STARTTLS (`SMTP_USE_TLS=true`, `SMTP_USE_SSL=false`). Enable 2-Step Verification on the Google account and create an App Password for SMTP. Store it in `SMTP_PASSWORD`; do not use or share your normal Gmail password. For another email provider, use its SMTP host, port, and required security mode. Copy `.env.example` to `.env` as a reference and keep `.env` private.
 
 For local frontend development, set `VITE_API_BASE_URL=http://127.0.0.1:8000` in the frontend environment. The frontend defaults to the existing hosted API URL, which must be redeployed with these backend changes for the new features to work there.
 
