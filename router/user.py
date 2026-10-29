@@ -3,17 +3,17 @@ import hmac
 import logging
 import os
 import secrets
-import smtplib
-import ssl
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
+from resend.exceptions import ResendError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+import resend
 
 from auth import SECRET_KEY, create_access_token, get_current_user
 from database import get_db
@@ -66,106 +66,56 @@ def _hash_otp(email: str, code: str) -> str:
 
 
 def _send_signup_otp(email: str, code: str, *, admin_invite: bool = False) -> None:
-    host = os.getenv("SMTP_HOST")
-    username = os.getenv("SMTP_USERNAME")
-    password = os.getenv("SMTP_PASSWORD")
-    sender = os.getenv("SMTP_FROM_EMAIL") or username
-    try:
-        port = int(os.getenv("SMTP_PORT", "587"))
-    except ValueError as error:
-        logger.error("[OTP] Email delivery is not configured; SMTP_PORT must be a number")
-        raise HTTPException(
-            status_code=503,
-            detail="Email delivery is not configured",
-        ) from error
-
-    use_ssl = os.getenv("SMTP_USE_SSL", "false").strip().lower() in {"1", "true", "yes"}
-    use_tls = os.getenv("SMTP_USE_TLS", "true").strip().lower() in {"1", "true", "yes"}
-    if not host or not username or not password or not sender or not 1 <= port <= 65535:
-        missing = [
-            key
-            for key, value in (
-                ("SMTP_HOST", host),
-                ("SMTP_USERNAME", username),
-                ("SMTP_PASSWORD", password),
-                ("SMTP_FROM_EMAIL", sender),
-            )
-            if not value
-        ]
-        if not 1 <= port <= 65535:
-            missing.append("valid SMTP_PORT")
-        logger.error("[OTP] Email delivery is not configured; missing %s", ", ".join(missing))
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        logger.error("[OTP] Email delivery is not configured; RESEND_API_KEY is missing")
         raise HTTPException(
             status_code=503,
             detail="Email delivery is not configured",
         )
-    if use_ssl and use_tls:
-        logger.error("[OTP] Email delivery is not configured; enable SMTP_USE_SSL or SMTP_USE_TLS, not both")
-        raise HTTPException(
-            status_code=503,
-            detail="Email delivery is not configured",
-        )
-
-    message = EmailMessage()
-    message["Subject"] = (
+    sender = os.getenv("EMAIL_FROM") or "onboarding@resend.dev"
+    subject = (
         "Your Task Manager admin invitation"
         if admin_invite
         else "Your Task Manager verification code"
     )
-    message["From"] = sender
-    message["To"] = email
     if admin_invite:
         frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
         completion_url = (
             f"{frontend_url}/admin/complete-signup"
             f"?email={quote(email, safe='')}"
         )
-        message.set_content(
+        text = (
             "An administrator invited you to create an admin account for Task Manager.\n\n"
             f"Your verification code is {code}. It expires in 10 minutes.\n\n"
             f"Complete setup here: {completion_url}\n"
             "If you were not expecting this invitation, you can ignore this email."
         )
     else:
-        message.set_content(
+        text = (
             f"Your Task Manager signup verification code is {code}. "
             "It expires in 10 minutes."
         )
 
+    resend.api_key = api_key
     try:
-        if use_ssl:
-            smtp_client = smtplib.SMTP_SSL(
-                host,
-                port,
-                timeout=10,
-                context=ssl.create_default_context(),
-            )
-        else:
-            smtp_client = smtplib.SMTP(host, port, timeout=10)
-
-        with smtp_client as server:
-            if use_tls:
-                server.starttls(context=ssl.create_default_context())
-            server.login(username, password)
-            server.send_message(message)
-            logger.info(
-                "[OTP] Email provider accepted verification message (email=%s)",
-                _mask_email(email),
-            )
-    except smtplib.SMTPResponseException as error:
-        logger.warning(
-            "[OTP] Email provider rejected verification message (status=%s, email=%s)",
-            error.smtp_code,
+        resend.Emails.send(
+            {
+                "from": sender,
+                "to": [email],
+                "subject": subject,
+                "text": text,
+            }
+        )
+        logger.info(
+            "[OTP] Email provider accepted verification message (email=%s)",
             _mask_email(email),
         )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Email delivery failed ({error.smtp_code})",
-        ) from error
-    except (smtplib.SMTPException, OSError) as error:
+    except ResendError as error:
         logger.warning(
-            "[OTP] Email delivery failed (%s, email=%s)",
-            type(error).__name__,
+            "[OTP] Email provider rejected verification message (status=%s, type=%s, email=%s)",
+            error.code,
+            error.error_type,
             _mask_email(email),
         )
         raise HTTPException(
