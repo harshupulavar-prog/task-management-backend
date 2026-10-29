@@ -469,15 +469,41 @@ def login(
     db: Session = Depends(get_db),
 ):
     email = form_data.username.strip().lower()
+    masked_email = _mask_email(email)
+    logger.info("[AUTH] Login attempt (email=%s)", masked_email)
+
     user = db.query(User).filter(func.lower(User.email) == email).first()
 
-    if user is None or len(form_data.password.encode("utf-8")) > 72:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not pwd_context.verify(form_data.password, user.hashed_password):
+    if user is None:
+        logger.warning(
+            "[AUTH] Login failed: account not found (email=%s)",
+            masked_email,
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    if len(form_data.password.encode("utf-8")) > 72:
+        logger.warning(
+            "[AUTH] Login failed: password exceeds allowed length (email=%s)",
+            masked_email,
+        )
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not pwd_context.verify(form_data.password, user.hashed_password):
+        logger.warning(
+            "[AUTH] Login failed: password mismatch (email=%s)",
+            masked_email,
+        )
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(user.email)
+    logger.info(
+        "[AUTH] Login successful (email=%s, role=%s)",
+        masked_email,
+        user.role,
+    )
+
     return {
-        "access_token": create_access_token(user.email),
+        "access_token": token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
